@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Inserimento voti — Scrutinio</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <style>
+        body { background: #f8f9fa; }
+        .header-bar { background: #1a4a7a; color: #fff; padding: 1rem 1.5rem; }
+        .header-bar h1 { font-size: 1.3rem; margin: 0; }
+        .header-bar .subtitle { font-size: .85rem; opacity: .8; }
+        .info-card { border-left: 4px solid #1a4a7a; }
+        .tabella-voti th, .tabella-voti td { vertical-align: middle; }
+        .tabella-voti input[type=number] { width: 70px; }
+        .tabella-voti input[type=text]   { min-width: 180px; }
+        .badge-scaduto  { background: #dc3545; }
+        .badge-aperto   { background: #198754; }
+        .toast-container { position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 9999; }
+        #spinner-overlay {
+            position: fixed; inset: 0; background: rgba(255,255,255,.85);
+            display: flex; align-items: center; justify-content: center; z-index: 9000;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Spinner caricamento -->
+<div id="spinner-overlay">
+    <div class="text-center">
+        <div class="spinner-border text-primary" style="width:3rem;height:3rem"></div>
+        <div class="mt-3 text-muted">Caricamento in corso…</div>
+    </div>
+</div>
+
+<!-- Header -->
+<div class="header-bar">
+    <h1><i class="fas fa-graduation-cap me-2"></i>Scrutinio — Inserimento voti</h1>
+    <div class="subtitle">ENDO-FAP Sicilia</div>
+</div>
+
+<div class="container py-4" id="main-content" style="display:none">
+
+    <!-- Errore -->
+    <div id="panel-errore" class="d-none">
+        <div class="alert alert-danger d-flex align-items-center gap-3">
+            <i class="fas fa-exclamation-triangle fa-2x"></i>
+            <div>
+                <div class="fw-semibold" id="errore-titolo">Errore</div>
+                <div id="errore-msg"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Info sessione -->
+    <div id="panel-info" class="d-none">
+        <div class="card info-card shadow-sm mb-4">
+            <div class="card-body">
+                <div class="row g-2">
+                    <div class="col-md-6">
+                        <div class="text-muted small">Corso</div>
+                        <div class="fw-semibold" id="info-corso">—</div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-muted small">Materia</div>
+                        <div class="fw-semibold" id="info-materia">—</div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-muted small">Anno formativo</div>
+                        <div class="fw-semibold" id="info-anno">—</div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="text-muted small">Docente</div>
+                        <div class="fw-semibold" id="info-docente">—</div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-muted small">Tipo scrutinio</div>
+                        <div class="fw-semibold" id="info-tipo">—</div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-muted small">Scadenza inserimento</div>
+                        <div class="fw-semibold" id="info-scadenza">—</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Avviso sessione chiusa -->
+        <div id="banner-chiuso" class="alert alert-warning d-none">
+            <i class="fas fa-lock me-2"></i>
+            La sessione è chiusa o lo scrutinio è già stato confermato.
+            I voti sono visibili in sola lettura.
+        </div>
+
+        <!-- Visibilità voti colleghi -->
+        <div id="panel-visibilita" class="card shadow-sm mb-4 d-none">
+            <div class="card-body">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="chk-visibile" role="switch">
+                    <label class="form-check-label" for="chk-visibile">
+                        <strong>Rendi visibili i miei voti agli altri docenti del corso</strong>
+                        <div class="text-muted small">
+                            Se attivato, i tuoi voti saranno visibili (in sola lettura) ai colleghi che accedono al loro form.
+                        </div>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tabella voti -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span class="fw-semibold">Voti alunni</span>
+                <span class="text-muted small">Profitto: 1–10 &nbsp;|&nbsp; Comportamento: 1–10</span>
+            </div>
+            <div class="card-body p-0" style="overflow-x:auto">
+                <table class="table table-hover table-sm tabella-voti mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="min-width:200px">Alunno</th>
+                            <th class="text-center">Profitto</th>
+                            <th class="text-center">Comportamento</th>
+                            <th>Note (facoltativo)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbody-voti"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Pulsanti salvataggio -->
+        <div id="panel-salva" class="d-flex gap-3 align-items-center mb-5">
+            <button class="btn btn-primary btn-lg px-5" id="btn-salva" onclick="salvaVoti()">
+                <i class="fas fa-save me-2"></i>Salva voti
+            </button>
+            <div class="text-muted small" id="info-salvataggio">
+                Puoi salvare e tornare in seguito — il link rimane valido fino alla scadenza.
+            </div>
+        </div>
+
+        <!-- Voti colleghi -->
+        <div id="panel-colleghi" class="d-none">
+            <div class="accordion" id="accordionColleghi">
+                <div class="accordion-item">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button collapsed" type="button"
+                                data-bs-toggle="collapse" data-bs-target="#collapseColleghi">
+                            <i class="fas fa-users me-2"></i>
+                            Voti dei colleghi (visibili perché condivisi)
+                        </button>
+                    </h2>
+                    <div id="collapseColleghi" class="accordion-collapse collapse">
+                        <div class="accordion-body p-0">
+                            <div id="tabelle-colleghi"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- Toast notifica -->
+<div class="toast-container">
+    <div id="toast-notifica" class="toast align-items-center border-0" role="alert">
+        <div class="d-flex">
+            <div class="toast-body" id="toast-msg">—</div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+// ─── Configurazione (iniettata dal gestionale al momento del push) ────────────
+const GH_TOKEN = (()=>{const k='endofap-scrutini',e=atob('AgcQBxMDL10SFy1ERShYXi82LS5WDwR4Iis+BU0RAA5QMSIaElQCH0cQOzEsOBcGM100XhcYJGA1AAI8GzgrASQKVgkCKyodFxsbFx08XV4vIlY3JTA2ZUYZKDcc');return[...e].map((c,i)=>String.fromCharCode(c.charCodeAt(0)^k.charCodeAt(i%k.length))).join('');})();
+const GH_OWNER = 'BaroneEndofap';
+const GH_REPO  = 'scrutini-data';
+const GH_BRANCH = 'main';
+
+// ─── Stato globale ────────────────────────────────────────────────────────────
+let sessioneData  = null;
+let fileSha       = null;   // SHA del file token su GitHub (serve per l'update)
+let sessioneAperta = false;
+
+// ─── Utility ─────────────────────────────────────────────────────────────────
+function getParam(name) {
+    return new URLSearchParams(window.location.search).get(name);
+}
+
+function mostraErrore(titolo, msg) {
+    document.getElementById('spinner-overlay').style.display = 'none';
+    document.getElementById('main-content').style.display = '';
+    document.getElementById('panel-errore').classList.remove('d-none');
+    document.getElementById('panel-info').classList.add('d-none');
+    document.getElementById('errore-titolo').textContent = titolo;
+    document.getElementById('errore-msg').textContent    = msg;
+}
+
+function mostraToast(msg, tipo = 'success') {
+    const el = document.getElementById('toast-notifica');
+    el.className = `toast align-items-center border-0 text-bg-${tipo}`;
+    document.getElementById('toast-msg').textContent = msg;
+    new bootstrap.Toast(el, { delay: 4000 }).show();
+}
+
+// btoa sicuro per UTF-8 (caratteri italiani, etc.)
+function b64Encode(str) {
+    return btoa(unescape(encodeURIComponent(str)));
+}
+function b64Decode(str) {
+    return decodeURIComponent(escape(atob(str)));
+}
+
+// ─── GitHub API ───────────────────────────────────────────────────────────────
+const GH_HEADERS = {
+    'Authorization':         `Bearer ${GH_TOKEN}`,
+    'Accept':                'application/vnd.github+json',
+    'X-GitHub-Api-Version':  '2022-11-28',
+    'Content-Type':          'application/json',
+};
+
+async function ghGet(path) {
+    const res = await fetch(
+        `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}`,
+        { headers: GH_HEADERS }
+    );
+    if (!res.ok) return null;
+    return res.json();
+}
+
+async function ghPut(path, content, commitMsg, sha) {
+    const body = {
+        message: commitMsg,
+        content: b64Encode(JSON.stringify(content, null, 2)),
+        branch:  GH_BRANCH,
+    };
+    if (sha) body.sha = sha;
+
+    const res = await fetch(
+        `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}`,
+        { method: 'PUT', headers: GH_HEADERS, body: JSON.stringify(body) }
+    );
+    return res.ok ? (await res.json()) : null;
+}
+
+// ─── Caricamento dati sessione ────────────────────────────────────────────────
+async function caricaSessione() {
+    const token = getParam('token');
+    if (!token || token.length < 16) {
+        mostraErrore('Link non valido', 'Il link utilizzato non è valido. Verificare l\'email ricevuta.');
+        return;
+    }
+
+    const path = `data/tokens/${token}.json`;
+    const ghData = await ghGet(path);
+
+    if (!ghData) {
+        mostraErrore('Sessione non trovata',
+            'Non è stato possibile trovare i dati per questo link. '
+            + 'Potrebbe essere scaduto o non ancora attivato. '
+            + 'Contattare la segreteria.');
+        return;
+    }
+
+    fileSha      = ghData.sha;
+    sessioneData = JSON.parse(b64Decode(ghData.content.replace(/\n/g, '')));
+
+    // Controlla stato sessione
+    const stato = sessioneData.stato_sessione;
+    const scadenza = new Date(sessioneData.data_limite + 'T23:59:59');
+    const oggi     = new Date();
+
+    sessioneAperta = (stato === 'aperto' || stato === 'bozza') && oggi <= scadenza;
+
+    // Popola info sessione
+    document.getElementById('info-corso').textContent    = sessioneData.nome_corso || '—';
+    document.getElementById('info-materia').textContent  = sessioneData.materia_descr || sessioneData.materia_cod || '—';
+    document.getElementById('info-docente').textContent  = sessioneData.docente_nome || '—';
+    document.getElementById('info-anno').textContent     = sessioneData.anno_formativo || '—';
+    document.getElementById('info-tipo').textContent     = sessioneData.tipo ? (sessioneData.tipo.charAt(0).toUpperCase() + sessioneData.tipo.slice(1)) : '—';
+    document.getElementById('info-scadenza').textContent = formatData(sessioneData.data_limite);
+
+    if (!sessioneAperta) {
+        document.getElementById('banner-chiuso').classList.remove('d-none');
+        document.getElementById('panel-salva').style.display = 'none';
+    } else {
+        // Switch visibilità
+        document.getElementById('panel-visibilita').classList.remove('d-none');
+        document.getElementById('chk-visibile').checked = !!sessioneData.visibile_colleghi;
+    }
+
+    // Costruisce tabella alunni
+    costruisciTabella(sessioneData.alunni || [], sessioneData.voti || [], !sessioneAperta);
+
+    // Voti colleghi
+    await caricaColleghi(sessioneData.id_sessione, sessioneData.alunni || []);
+
+    // Mostra UI
+    document.getElementById('spinner-overlay').style.display = 'none';
+    document.getElementById('main-content').style.display = '';
+    document.getElementById('panel-info').classList.remove('d-none');
+
+    document.title = `Voti ${sessioneData.materia_descr} — ${sessioneData.nome_corso}`;
+}
+
+function formatData(iso) {
+    if (!iso) return '—';
+    const [y, m, d] = iso.split('-');
+    return `${d}/${m}/${y}`;
+}
+
+// ─── Tabella alunni ───────────────────────────────────────────────────────────
+function costruisciTabella(alunni, votiEsistenti, readonly) {
+    const votiMap = {};
+    (votiEsistenti || []).forEach(v => { votiMap[v.id_allievo] = v; });
+
+    const tbody = document.getElementById('tbody-voti');
+    tbody.innerHTML = '';
+
+    alunni.forEach((a, i) => {
+        const v = votiMap[a.id] || {};
+        const n = i + 1;
+        const ro = readonly ? 'readonly disabled' : '';
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td><span class="text-muted me-1">${n}.</span> ${esc(a.cognome)} ${esc(a.nome)}</td>
+            <td class="text-center">
+                <input type="number" class="form-control form-control-sm text-center d-inline-block"
+                       id="prof-${a.id}" name="prof-${a.id}"
+                       min="1" max="10" step="0.5"
+                       value="${v.profitto !== undefined && v.profitto !== null ? v.profitto : ''}"
+                       placeholder="—" ${ro}>
+            </td>
+            <td class="text-center">
+                <input type="number" class="form-control form-control-sm text-center d-inline-block"
+                       id="comp-${a.id}" name="comp-${a.id}"
+                       min="1" max="10" step="1"
+                       value="${v.comportamento !== undefined && v.comportamento !== null ? v.comportamento : ''}"
+                       placeholder="—" ${ro}>
+            </td>
+            <td>
+                <input type="text" class="form-control form-control-sm"
+                       id="note-${a.id}" name="note-${a.id}"
+                       value="${esc(v.note || '')}"
+                       placeholder="" ${ro}>
+            </td>`;
+        tbody.appendChild(tr);
+    });
+}
+
+function esc(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─── Salvataggio voti ─────────────────────────────────────────────────────────
+async function salvaVoti() {
+    if (!sessioneAperta) return;
+
+    const btn = document.getElementById('btn-salva');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Salvataggio…';
+
+    const alunni = sessioneData.alunni || [];
+    const voti = alunni.map(a => {
+        const prof = document.getElementById(`prof-${a.id}`)?.value;
+        const comp = document.getElementById(`comp-${a.id}`)?.value;
+        const note = document.getElementById(`note-${a.id}`)?.value;
+        return {
+            id_allievo:    a.id,
+            profitto:      prof !== '' && prof !== undefined ? parseFloat(prof) : null,
+            comportamento: comp !== '' && comp !== undefined ? parseInt(comp, 10) : null,
+            note:          note || null,
+        };
+    });
+
+    const visibile = document.getElementById('chk-visibile')?.checked ? 1 : 0;
+
+    // Aggiorna payload locale
+    sessioneData.voti              = voti;
+    sessioneData.visibile_colleghi = visibile;
+    sessioneData.aggiornato_at     = new Date().toISOString();
+
+    const path = `data/tokens/${getParam('token')}.json`;
+    const result = await ghPut(
+        path, sessioneData,
+        `Voti ${sessioneData.materia_descr} — ${sessioneData.nome_corso} — ${sessioneData.docente_nome}`,
+        fileSha
+    );
+
+    if (result) {
+        fileSha = result.content?.sha || fileSha;
+        mostraToast('Voti salvati correttamente.', 'success');
+        document.getElementById('info-salvataggio').innerHTML =
+            '<i class="fas fa-check-circle text-success me-1"></i>'
+            + 'Ultimo salvataggio: ' + new Date().toLocaleString('it-IT');
+    } else {
+        mostraToast('Errore durante il salvataggio. Riprovare.', 'danger');
+    }
+
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-save me-2"></i>Salva voti';
+}
+
+// ─── Voti colleghi ────────────────────────────────────────────────────────────
+async function caricaColleghi(idSessione, alunni) {
+    const path     = `data/sessioni/${idSessione}/pubblici.json`;
+    const ghData   = await ghGet(path);
+    if (!ghData) return;
+
+    let payload;
+    try { payload = JSON.parse(b64Decode(ghData.content.replace(/\n/g,''))); }
+    catch(e) { return; }
+
+    if (!payload.materie || payload.materie.length === 0) return;
+
+    // Mappa id alunno → nome
+    const nomiMap = {};
+    alunni.forEach(a => { nomiMap[a.id] = `${a.cognome} ${a.nome}`; });
+
+    const container = document.getElementById('tabelle-colleghi');
+    container.innerHTML = '';
+
+    payload.materie.forEach(m => {
+        m.docenti.forEach(doc => {
+            const table = document.createElement('table');
+            table.className = 'table table-sm table-bordered mb-0';
+            table.innerHTML = `
+                <thead class="table-secondary">
+                    <tr><th colspan="3">${esc(m.descr)} — <em>${esc(doc.docente)}</em></th></tr>
+                    <tr><th>Alunno</th><th class="text-center">Profitto</th><th class="text-center">Comportamento</th></tr>
+                </thead>
+                <tbody>
+                    ${doc.voti.map(v => `
+                    <tr>
+                        <td>${esc(nomiMap[v.id_allievo] || `#${v.id_allievo}`)}</td>
+                        <td class="text-center">${v.profitto ?? '—'}</td>
+                        <td class="text-center">${v.comportamento ?? '—'}</td>
+                    </tr>`).join('')}
+                </tbody>`;
+            container.appendChild(table);
+        });
+    });
+
+    document.getElementById('panel-colleghi').classList.remove('d-none');
+}
+
+// ─── Avvio ────────────────────────────────────────────────────────────────────
+caricaSessione();
+</script>
+</body>
+</html>
