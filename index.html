@@ -13,8 +13,8 @@
         .header-bar .subtitle { font-size: .85rem; opacity: .8; }
         .info-card { border-left: 4px solid #1a4a7a; }
         .tabella-voti th, .tabella-voti td { vertical-align: middle; }
-        .tabella-voti input[type=number] { width: 70px; }
-        .tabella-voti input[type=text]   { min-width: 180px; }
+        .tabella-voti select              { width: 90px; }
+        .tabella-voti input[type=text]    { min-width: 180px; }
         .badge-scaduto  { background: #dc3545; }
         .badge-aperto   { background: #198754; }
         .toast-container { position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 9999; }
@@ -157,7 +157,16 @@ function mostraToast(msg, tipo='success') {
     new bootstrap.Toast(el, { delay: 4000 }).show();
 }
 
-// ─── GitHub API ───────────────────────────────────────────────────────────────
+// ─── Helper: opzioni voto (N.C. + 1-10) ─────────────────────────────────────
+function opzioniVoto(valoreCorrente) {
+    const voti = [['', '—'], [0, 'N.C.'], ...Array.from({length:10},(_,i)=>[i+1,i+1])];
+    return voti.map(([v, label]) => {
+        const sel = valoreCorrente !== null && valoreCorrente !== undefined && String(valoreCorrente) === String(v) ? 'selected' : '';
+        return `<option value="${v}" ${sel}>${label}</option>`;
+    }).join('');
+}
+
+
 const GH_HEADERS = {
     'Authorization':        `Bearer ${GH_TOKEN}`,
     'Accept':               'application/vnd.github+json',
@@ -266,14 +275,14 @@ function costruisciAccordion(sessioni) {
             tr.innerHTML = `
                 <td><span class="text-muted me-1">${ai+1}.</span> ${esc(a.cognome)} ${esc(a.nome)}</td>
                 <td class="text-center">
-                    <input type="number" class="form-control form-control-sm text-center d-inline-block"
-                           id="prof-${idx}-${a.id}" min="1" max="10" step="1"
-                           value="${v.profitto ?? ''}" placeholder="—" ${ro}>
+                    <select class="form-select form-select-sm" id="prof-${idx}-${a.id}" ${ro}>
+                        ${opzioniVoto(v.profitto)}
+                    </select>
                 </td>
                 <td class="text-center">
-                    <input type="number" class="form-control form-control-sm text-center d-inline-block"
-                           id="comp-${idx}-${a.id}" min="1" max="10" step="1"
-                           value="${v.comportamento ?? ''}" placeholder="—" ${ro}>
+                    <select class="form-select form-select-sm" id="comp-${idx}-${a.id}" ${ro}>
+                        ${opzioniVoto(v.comportamento)}
+                    </select>
                 </td>
                 <td>
                     <input type="text" class="form-control form-control-sm"
@@ -338,8 +347,8 @@ async function salvaVoti() {
             const note = document.getElementById(`note-${idx}-${a.id}`)?.value;
             return {
                 id_allievo:    a.id,
-                profitto:      prof !== '' && prof != null ? parseInt(prof, 10) : null,
-                comportamento: comp !== '' && comp != null ? parseInt(comp, 10) : null,
+                profitto:      prof !== '' && prof !== undefined ? parseInt(prof, 10) : null,
+                comportamento: comp !== '' && comp !== undefined ? parseInt(comp, 10) : null,
                 note:          note || null,
             };
         });
