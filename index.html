@@ -235,14 +235,36 @@ async function ghGet(path) {
     return res.json();
 }
 
-async function ghPut(path, content, commitMsg, sha) {
-    const body = { message: commitMsg, content: b64Encode(JSON.stringify(content, null, 2)), branch: GH_BRANCH };
-    if (sha) body.sha = sha;
+async function ghGetFresh(path) {
     const res = await fetch(
         `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}`,
-        { method: 'PUT', headers: GH_HEADERS, body: JSON.stringify(body) }
+        { headers: GH_HEADERS, cache: 'no-cache' }
     );
-    return res.ok ? (await res.json()) : null;
+    if (!res.ok) return null;
+    return res.json();
+}
+
+async function ghPut(path, content, commitMsg, sha) {
+    const bodyObj = { message: commitMsg, content: b64Encode(JSON.stringify(content, null, 2)), branch: GH_BRANCH };
+    if (sha) bodyObj.sha = sha;
+    let res = await fetch(
+        `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}`,
+        { method: 'PUT', headers: GH_HEADERS, body: JSON.stringify(bodyObj) }
+    );
+    if (res.ok) return await res.json();
+    // Conflitto SHA (409): rilegge SHA aggiornato e riprova una volta
+    if (res.status === 409) {
+        const fresh = await ghGetFresh(path);
+        if (fresh) {
+            bodyObj.sha = fresh.sha;
+            res = await fetch(
+                `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}`,
+                { method: 'PUT', headers: GH_HEADERS, body: JSON.stringify(bodyObj) }
+            );
+            if (res.ok) return await res.json();
+        }
+    }
+    return { _errStatus: res.status };
 }
 
 // ─── Sessione modificabile? ───────────────────────────────────────────────────
@@ -482,6 +504,11 @@ async function salvaVoti() {
 
     docenteData.aggiornato_at = new Date().toISOString();
 
+    // Rilegge lo SHA fresco prima di salvare: evita conflitti da cache iOS
+    // o da push admin avvenuti dopo l'apertura della pagina
+    const freshFile = await ghGetFresh(`data/docenti/${currentToken}.json`);
+    if (freshFile) fileSha = freshFile.sha;
+
     const result = await ghPut(
         `data/docenti/${currentToken}.json`,
         docenteData,
@@ -489,14 +516,15 @@ async function salvaVoti() {
         fileSha
     );
 
-    if (result) {
+    if (result && !result._errStatus) {
         fileSha = result.content?.sha || fileSha;
         mostraToast('Voti salvati correttamente.', 'success');
         document.getElementById('info-salvataggio').innerHTML =
             '<i class="fas fa-check-circle text-success me-1"></i>'
             + 'Ultimo salvataggio: ' + new Date().toLocaleString('it-IT');
     } else {
-        mostraToast('Errore durante il salvataggio. Riprovare.', 'danger');
+        const stato = result?._errStatus ? ` (errore ${result._errStatus})` : '';
+        mostraToast(`Errore durante il salvataggio${stato}. Riprovare.`, 'danger');
     }
 
     btn.disabled = false;
