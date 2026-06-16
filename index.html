@@ -253,7 +253,51 @@ function isSessioneAperta(s) {
 }
 
 // ─── Costruzione accordion ────────────────────────────────────────────────────
-function costruisciAccordion(sessioni) {
+function renderColleghiPanel(idx, s, colleghiMap) {
+    const pubblici = colleghiMap[s.id_sessione];
+    if (!pubblici) return '';
+    const materia = (pubblici.materie || []).find(m => m.cod === s.materia_cod);
+    if (!materia || !(materia.docenti || []).length) return '';
+
+    const alunniMap = {};
+    (s.alunni || []).forEach(a => { alunniMap[a.id] = a; });
+
+    let rows = '';
+    materia.docenti.forEach(d => {
+        (d.voti || []).forEach(v => {
+            const a = alunniMap[v.id_allievo];
+            if (!a) return;
+            rows += `<tr>
+                <td><span class="text-muted me-1">·</span>${esc(a.cognome)} ${esc(a.nome)}</td>
+                <td class="text-center">${v.profitto != null ? v.profitto : '—'}</td>
+                <td class="text-center">${v.comportamento != null ? v.comportamento : '—'}</td>
+                <td class="text-muted small">${esc(d.docente)}</td>
+            </tr>`;
+        });
+    });
+    if (!rows) return '';
+
+    const n = materia.docenti.length;
+    return `<div class="mt-3 border-top pt-2">
+        <button class="btn btn-sm btn-outline-secondary mb-2" type="button"
+                data-bs-toggle="collapse" data-bs-target="#colleghi-${idx}">
+            <i class="fas fa-users me-1"></i>Voti colleghi (${n} ${n === 1 ? 'condiviso' : 'condivisi'})
+        </button>
+        <div class="collapse" id="colleghi-${idx}">
+            <table class="table table-sm table-bordered mb-0">
+                <thead class="table-secondary">
+                    <tr><th>Alunno</th>
+                        <th class="text-center" style="width:80px">Profitto</th>
+                        <th class="text-center" style="width:80px">Comp.</th>
+                        <th>Docente</th></tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+    </div>`;
+}
+
+function costruisciAccordion(sessioni, colleghiMap = {}) {
     const container = document.getElementById('accordion-sessioni');
     container.innerHTML = '';
 
@@ -321,6 +365,7 @@ function costruisciAccordion(sessioni) {
                         </thead>
                         <tbody id="tbody-${idx}"></tbody>
                     </table>
+                    ${renderColleghiPanel(idx, s, colleghiMap)}
                 </div>
             </div>`;
         acc.appendChild(item);
@@ -376,11 +421,20 @@ async function caricaModoDocente(token) {
     docenteData  = JSON.parse(b64Decode(ghData.content.replace(/\n/g,'')));
 
     const sessioni = docenteData.sessioni || [];
+
+    // Fetch voti pubblici dei colleghi per ogni sessione del docente
+    const sessionIds = [...new Set(sessioni.map(s => s.id_sessione))];
+    const colleghiMap = {};
+    await Promise.all(sessionIds.map(async id => {
+        const d = await ghGet(`data/sessioni/${id}/pubblici.json`);
+        if (d) { try { colleghiMap[id] = JSON.parse(b64Decode(d.content.replace(/\n/g,''))); } catch(e) {} }
+    }));
+
     document.getElementById('info-docente').textContent        = docenteData.docente_nome || '—';
     document.getElementById('info-sessioni-count').textContent =
         sessioni.length + (sessioni.length === 1 ? ' sessione attiva' : ' sessioni attive');
 
-    costruisciAccordion(sessioni);
+    costruisciAccordion(sessioni, colleghiMap);
 
     document.getElementById('spinner-overlay').style.display = 'none';
     document.getElementById('main-content').style.display    = '';
