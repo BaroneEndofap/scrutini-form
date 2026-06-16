@@ -41,7 +41,7 @@
 </div>
 
 <!-- Pannello admin (visibile solo con token admin) -->
-<div id="panel-admin" style="display:none" class="bg-dark text-white px-4 py-2 d-flex align-items-center gap-3 flex-wrap">
+<div id="panel-admin" class="d-none bg-dark text-white px-4 py-2 align-items-center gap-3 flex-wrap">
     <span class="badge bg-warning text-dark"><i class="fas fa-user-shield me-1"></i>Modalità amministratore</span>
     <select id="admin-select-sessione" class="form-select form-select-sm w-auto" onchange="adminSelezionaSessione()">
         <option value="">— seleziona sessione —</option>
@@ -454,7 +454,9 @@ async function caricaModoAdmin() {
 
     adminIndex = JSON.parse(b64Decode(ghData.content.replace(/\n/g,'')));
 
-    document.getElementById('panel-admin').style.display = '';
+    const panelAdmin = document.getElementById('panel-admin');
+    panelAdmin.classList.remove('d-none');
+    panelAdmin.classList.add('d-flex');
     const selSessione = document.getElementById('admin-select-sessione');
     (adminIndex.sessioni || []).forEach(s => {
         const opt = document.createElement('option');
