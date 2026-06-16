@@ -40,6 +40,17 @@
     <div class="subtitle">ENDO-FAP Sicilia</div>
 </div>
 
+<!-- Pannello admin (visibile solo con token admin) -->
+<div id="panel-admin" style="display:none" class="bg-dark text-white px-4 py-2 d-flex align-items-center gap-3 flex-wrap">
+    <span class="badge bg-warning text-dark"><i class="fas fa-user-shield me-1"></i>Modalità amministratore</span>
+    <select id="admin-select-sessione" class="form-select form-select-sm w-auto" onchange="adminSelezionaSessione()">
+        <option value="">— seleziona sessione —</option>
+    </select>
+    <select id="admin-select-token" class="form-select form-select-sm w-auto" style="display:none" onchange="adminSelezionaToken()">
+        <option value="">— seleziona docente/materia —</option>
+    </select>
+</div>
+
 <div class="container py-4" id="main-content" style="display:none">
 
     <!-- Errore -->
@@ -175,15 +186,20 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 // ─── Configurazione (iniettata dal gestionale al momento del push) ────────────
-const GH_TOKEN = (()=>{const k='endofap-scrutini',e=atob('AgcQBxMDL10SFy1ERShYXi82LS5WDwR4Iis+BU0RAA5QMSIaElQCH0cQOzEsOBcGM100XhcYJGA1AAI8GzgrASQKVgkCKyodFxsbFx08XV4vIlY3JTA2ZUYZKDcc');return[...e].map((c,i)=>String.fromCharCode(c.charCodeAt(0)^k.charCodeAt(i%k.length))).join('');})();
-const GH_OWNER = 'BaroneEndofap';
-const GH_REPO  = 'scrutini-data';
+const _xk = 'endofap-scrutini';
+const _xor = (b64) => { const e=atob(b64); return[...e].map((c,i)=>String.fromCharCode(c.charCodeAt(0)^_xk.charCodeAt(i%_xk.length))).join(''); };
+const GH_TOKEN    = _xor('AgcQBxMDL10SFy1ERShYXi82LS5WDwR4Iis+BU0RAA5QMSIaElQCH0cQOzEsOBcGM100XhcYJGA1AAI8GzgrASQKVgkCKyodFxsbFx08XV4vIlY3JTA2ZUYZKDcc');
+const ADMIN_TOKEN = _xor('AQoAXFZVSRgQVRQRTFFaWQYIUFcEVEIfFldBTRVbCF8GCl1bBAQSHBBRFxMQUVhQ');
+const GH_OWNER  = 'BaroneEndofap';
+const GH_REPO   = 'scrutini-data';
 const GH_BRANCH = 'main';
 
 // ─── Stato globale ────────────────────────────────────────────────────────────
-let sessioneData  = null;
-let fileSha       = null;   // SHA del file token su GitHub (serve per l'update)
+let sessioneData   = null;
+let fileSha        = null;
 let sessioneAperta = false;
+let isAdmin        = false;
+let adminIndex     = null;
 
 // ─── Utility ─────────────────────────────────────────────────────────────────
 function getParam(name) {
@@ -254,7 +270,18 @@ async function caricaSessione() {
         return;
     }
 
-    const path = `data/tokens/${token}.json`;
+    // Token amministratore: carica l'indice di tutte le sessioni
+    if (token === ADMIN_TOKEN) {
+        isAdmin = true;
+        await caricaModoAdmin();
+        return;
+    }
+
+    await caricaModoDocente(token);
+}
+
+async function caricaModoDocente(token) {
+    const path   = `data/tokens/${token}.json`;
     const ghData = await ghGet(path);
 
     if (!ghData) {
@@ -403,6 +430,78 @@ async function salvaVoti() {
 
     btn.disabled = false;
     btn.innerHTML = '<i class="fas fa-save me-2"></i>Salva voti';
+}
+
+// ─── Modalità amministratore ──────────────────────────────────────────────────
+async function caricaModoAdmin() {
+    const ghData = await ghGet('data/admin_index.json');
+    if (!ghData) {
+        mostraErrore('Indice non disponibile',
+            'Il file admin_index.json non è ancora stato generato. '
+            + 'Dal gestionale: genera i token di una sessione per crearlo.');
+        return;
+    }
+
+    adminIndex = JSON.parse(b64Decode(ghData.content.replace(/\n/g, '')));
+
+    // Mostra pannello admin
+    document.getElementById('panel-admin').style.display = '';
+    const selSessione = document.getElementById('admin-select-sessione');
+    adminIndex.sessioni.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = `${s.nome_corso} — ${s.tipo} ${s.anno_formativo} (${s.stato})`;
+        selSessione.appendChild(opt);
+    });
+
+    // Nascondi spinner, mostra main-content vuoto
+    document.getElementById('spinner-overlay').style.display = 'none';
+    document.getElementById('main-content').style.display = '';
+    // Nasconde pannello info finché non si seleziona una sessione
+    document.getElementById('panel-info').classList.add('d-none');
+    document.getElementById('panel-errore').classList.add('d-none');
+}
+
+function adminSelezionaSessione() {
+    const idSessione = document.getElementById('admin-select-sessione').value;
+    const selToken   = document.getElementById('admin-select-token');
+    selToken.innerHTML = '<option value="">— seleziona docente/materia —</option>';
+    selToken.style.display = 'none';
+    document.getElementById('panel-info').classList.add('d-none');
+
+    if (!idSessione) return;
+
+    const sessione = adminIndex.sessioni.find(s => s.id == idSessione);
+    if (!sessione) return;
+
+    sessione.tokens.forEach(t => {
+        const opt     = document.createElement('option');
+        opt.value     = t.token;
+        const stato   = t.compilato ? '✓' : '○';
+        opt.textContent = `${stato} ${t.materia_descr} — ${t.docente_nome}`;
+        selToken.appendChild(opt);
+    });
+    selToken.style.display = '';
+}
+
+async function adminSelezionaToken() {
+    const tokenVal = document.getElementById('admin-select-token').value;
+    if (!tokenVal) { document.getElementById('panel-info').classList.add('d-none'); return; }
+
+    document.getElementById('spinner-overlay').style.display = 'flex';
+    await caricaModoDocente(tokenVal);
+    // In modalità admin il form è sempre aperto (indipendentemente dalla scadenza)
+    if (!sessioneAperta) {
+        sessioneAperta = true;
+        document.getElementById('banner-chiuso').classList.add('d-none');
+        document.getElementById('panel-salva').style.display = '';
+        document.getElementById('panel-visibilita').classList.remove('d-none');
+        // Riabilita input
+        document.querySelectorAll('#tbody-voti input').forEach(el => {
+            el.removeAttribute('readonly');
+            el.removeAttribute('disabled');
+        });
+    }
 }
 
 // ─── Voti colleghi ────────────────────────────────────────────────────────────
