@@ -47,7 +47,7 @@
         <option value="">— seleziona sessione —</option>
     </select>
     <select id="admin-select-token" class="form-select form-select-sm w-auto" style="display:none" onchange="adminSelezionaToken()">
-        <option value="">— seleziona docente/materia —</option>
+        <option value="">— seleziona docente —</option>
     </select>
 </div>
 
@@ -64,111 +64,35 @@
         </div>
     </div>
 
-    <!-- Info sessione -->
+    <!-- Info docente -->
     <div id="panel-info" class="d-none">
         <div class="card info-card shadow-sm mb-4">
             <div class="card-body">
                 <div class="row g-2">
                     <div class="col-md-6">
-                        <div class="text-muted small">Corso</div>
-                        <div class="fw-semibold" id="info-corso">—</div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="text-muted small">Materia</div>
-                        <div class="fw-semibold" id="info-materia">—</div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="text-muted small">Anno formativo</div>
-                        <div class="fw-semibold" id="info-anno">—</div>
-                    </div>
-                    <div class="col-md-6">
                         <div class="text-muted small">Docente</div>
                         <div class="fw-semibold" id="info-docente">—</div>
                     </div>
-                    <div class="col-md-3">
-                        <div class="text-muted small">Tipo scrutinio</div>
-                        <div class="fw-semibold" id="info-tipo">—</div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="text-muted small">Scadenza inserimento</div>
-                        <div class="fw-semibold" id="info-scadenza">—</div>
+                    <div class="col-md-6">
+                        <div class="text-muted small">Sessioni attive</div>
+                        <div class="fw-semibold" id="info-sessioni-count">—</div>
                     </div>
                 </div>
-            </div>
-        </div>
-
-        <!-- Avviso sessione chiusa -->
-        <div id="banner-chiuso" class="alert alert-warning d-none">
-            <i class="fas fa-lock me-2"></i>
-            La sessione è chiusa o lo scrutinio è già stato confermato.
-            I voti sono visibili in sola lettura.
-        </div>
-
-        <!-- Visibilità voti colleghi -->
-        <div id="panel-visibilita" class="card shadow-sm mb-4 d-none">
-            <div class="card-body">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="chk-visibile" role="switch">
-                    <label class="form-check-label" for="chk-visibile">
-                        <strong>Rendi visibili i miei voti agli altri docenti del corso</strong>
-                        <div class="text-muted small">
-                            Se attivato, i tuoi voti saranno visibili (in sola lettura) ai colleghi che accedono al loro form.
-                        </div>
-                    </label>
-                </div>
-            </div>
-        </div>
-
-        <!-- Tabella voti -->
-        <div class="card shadow-sm mb-4">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <span class="fw-semibold">Voti alunni</span>
-                <span class="text-muted small">Profitto: 1–10 &nbsp;|&nbsp; Comportamento: 1–10</span>
-            </div>
-            <div class="card-body p-0" style="overflow-x:auto">
-                <table class="table table-hover table-sm tabella-voti mb-0">
-                    <thead class="table-light">
-                        <tr>
-                            <th style="min-width:200px">Alunno</th>
-                            <th class="text-center">Profitto</th>
-                            <th class="text-center">Comportamento</th>
-                            <th>Note (facoltativo)</th>
-                        </tr>
-                    </thead>
-                    <tbody id="tbody-voti"></tbody>
-                </table>
             </div>
         </div>
 
         <!-- Pulsanti salvataggio -->
-        <div id="panel-salva" class="d-flex gap-3 align-items-center mb-5">
+        <div id="panel-salva" class="d-flex gap-3 align-items-center mb-4">
             <button class="btn btn-primary btn-lg px-5" id="btn-salva" onclick="salvaVoti()">
-                <i class="fas fa-save me-2"></i>Salva voti
+                <i class="fas fa-save me-2"></i>Salva tutti i voti
             </button>
             <div class="text-muted small" id="info-salvataggio">
                 Puoi salvare e tornare in seguito — il link rimane valido fino alla scadenza.
             </div>
         </div>
 
-        <!-- Voti colleghi -->
-        <div id="panel-colleghi" class="d-none">
-            <div class="accordion" id="accordionColleghi">
-                <div class="accordion-item">
-                    <h2 class="accordion-header">
-                        <button class="accordion-button collapsed" type="button"
-                                data-bs-toggle="collapse" data-bs-target="#collapseColleghi">
-                            <i class="fas fa-users me-2"></i>
-                            Voti dei colleghi (visibili perché condivisi)
-                        </button>
-                    </h2>
-                    <div id="collapseColleghi" class="accordion-collapse collapse">
-                        <div class="accordion-body p-0">
-                            <div id="tabelle-colleghi"></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <!-- Accordion corsi/materie -->
+        <div id="accordion-sessioni"></div>
     </div>
 
 </div>
@@ -195,16 +119,27 @@ const GH_REPO   = 'scrutini-data';
 const GH_BRANCH = 'main';
 
 // ─── Stato globale ────────────────────────────────────────────────────────────
-let sessioneData   = null;
-let fileSha        = null;
-let sessioneAperta = false;
-let isAdmin        = false;
-let adminIndex     = null;
+let docenteData  = null;   // intero JSON del docente (tutte le sue sessioni)
+let fileSha      = null;
+let isAdmin      = false;
+let adminIndex   = null;
+let currentToken = null;   // portal token in uso
 
-// ─── Utility ─────────────────────────────────────────────────────────────────
-function getParam(name) {
-    return new URLSearchParams(window.location.search).get(name);
+// ─── Utility ──────────────────────────────────────────────────────────────────
+function getParam(name) { return new URLSearchParams(window.location.search).get(name); }
+
+function esc(s) {
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+
+function formatData(iso) {
+    if (!iso) return '—';
+    const [y,m,d] = iso.split('-');
+    return `${d}/${m}/${y}`;
+}
+
+function b64Encode(str) { return btoa(unescape(encodeURIComponent(str))); }
+function b64Decode(str) { return decodeURIComponent(escape(atob(str))); }
 
 function mostraErrore(titolo, msg) {
     document.getElementById('spinner-overlay').style.display = 'none';
@@ -215,27 +150,19 @@ function mostraErrore(titolo, msg) {
     document.getElementById('errore-msg').textContent    = msg;
 }
 
-function mostraToast(msg, tipo = 'success') {
+function mostraToast(msg, tipo='success') {
     const el = document.getElementById('toast-notifica');
     el.className = `toast align-items-center border-0 text-bg-${tipo}`;
     document.getElementById('toast-msg').textContent = msg;
     new bootstrap.Toast(el, { delay: 4000 }).show();
 }
 
-// btoa sicuro per UTF-8 (caratteri italiani, etc.)
-function b64Encode(str) {
-    return btoa(unescape(encodeURIComponent(str)));
-}
-function b64Decode(str) {
-    return decodeURIComponent(escape(atob(str)));
-}
-
 // ─── GitHub API ───────────────────────────────────────────────────────────────
 const GH_HEADERS = {
-    'Authorization':         `Bearer ${GH_TOKEN}`,
-    'Accept':                'application/vnd.github+json',
-    'X-GitHub-Api-Version':  '2022-11-28',
-    'Content-Type':          'application/json',
+    'Authorization':        `Bearer ${GH_TOKEN}`,
+    'Accept':               'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+    'Content-Type':         'application/json',
 };
 
 async function ghGet(path) {
@@ -248,13 +175,8 @@ async function ghGet(path) {
 }
 
 async function ghPut(path, content, commitMsg, sha) {
-    const body = {
-        message: commitMsg,
-        content: b64Encode(JSON.stringify(content, null, 2)),
-        branch:  GH_BRANCH,
-    };
+    const body = { message: commitMsg, content: b64Encode(JSON.stringify(content, null, 2)), branch: GH_BRANCH };
     if (sha) body.sha = sha;
-
     const res = await fetch(
         `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}`,
         { method: 'PUT', headers: GH_HEADERS, body: JSON.stringify(body) }
@@ -262,159 +184,173 @@ async function ghPut(path, content, commitMsg, sha) {
     return res.ok ? (await res.json()) : null;
 }
 
-// ─── Caricamento dati sessione ────────────────────────────────────────────────
-async function caricaSessione() {
-    const token = getParam('token');
-    if (!token || token.length < 16) {
-        mostraErrore('Link non valido', 'Il link utilizzato non è valido. Verificare l\'email ricevuta.');
-        return;
-    }
-
-    // Token amministratore: carica l'indice di tutte le sessioni
-    if (token === ADMIN_TOKEN) {
-        isAdmin = true;
-        await caricaModoAdmin();
-        return;
-    }
-
-    await caricaModoDocente(token);
+// ─── Sessione modificabile? ───────────────────────────────────────────────────
+function isSessioneAperta(s) {
+    const oggi = new Date();
+    const scad = new Date(s.data_limite + 'T23:59:59');
+    return (s.stato_sessione === 'aperto' || s.stato_sessione === 'bozza') && oggi <= scad;
 }
 
-async function caricaModoDocente(token) {
-    const path   = `data/tokens/${token}.json`;
-    const ghData = await ghGet(path);
+// ─── Costruzione accordion ────────────────────────────────────────────────────
+function costruisciAccordion(sessioni) {
+    const container = document.getElementById('accordion-sessioni');
+    container.innerHTML = '';
 
+    if (!sessioni || sessioni.length === 0) {
+        container.innerHTML = '<div class="alert alert-info">Nessuna sessione attiva assegnata.</div>';
+        return;
+    }
+
+    const acc = document.createElement('div');
+    acc.className = 'accordion';
+    acc.id = 'accordionSessioni';
+
+    sessioni.forEach((s, idx) => {
+        const aperta = isAdmin || isSessioneAperta(s);
+        const itemId = `sess-${idx}`;
+
+        const badgeStato = aperta
+            ? `<span class="badge bg-success ms-2">Aperto</span>`
+            : `<span class="badge bg-secondary ms-2">${esc(s.stato_sessione)}</span>`;
+
+        const item = document.createElement('div');
+        item.className = 'accordion-item mb-2 shadow-sm';
+        item.innerHTML = `
+            <h2 class="accordion-header">
+                <button class="accordion-button ${idx === 0 ? '' : 'collapsed'}" type="button"
+                        data-bs-toggle="collapse" data-bs-target="#${itemId}">
+                    <span class="fw-semibold">${esc(s.nome_corso)}</span>
+                    <span class="text-muted mx-2">—</span>
+                    <span>${esc(s.materia_descr || s.materia_cod)}</span>
+                    ${badgeStato}
+                    <span class="text-muted small ms-auto me-3">Scadenza: ${formatData(s.data_limite)}</span>
+                </button>
+            </h2>
+            <div id="${itemId}" class="accordion-collapse collapse ${idx === 0 ? 'show' : ''}">
+                <div class="accordion-body">
+                    ${aperta ? `
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" id="vis-${idx}"
+                               ${s.visibile_colleghi ? 'checked' : ''}>
+                        <label class="form-check-label text-muted small" for="vis-${idx}">
+                            Rendi i miei voti visibili agli altri docenti del corso
+                        </label>
+                    </div>` : `
+                    <div class="alert alert-warning py-2 mb-3 small">
+                        <i class="fas fa-lock me-1"></i>
+                        Sessione <strong>${esc(s.stato_sessione)}</strong> — voti in sola lettura.
+                    </div>`}
+                    <table class="table table-sm table-hover tabella-voti">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Alunno</th>
+                                <th class="text-center" style="width:90px">Profitto</th>
+                                <th class="text-center" style="width:90px">Comportamento</th>
+                                <th>Note</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody-${idx}"></tbody>
+                    </table>
+                </div>
+            </div>`;
+        acc.appendChild(item);
+
+        // Popola tbody
+        const votiMap = {};
+        (s.voti || []).forEach(v => { votiMap[v.id_allievo] = v; });
+        const tbody = item.querySelector(`#tbody-${idx}`);
+        (s.alunni || []).forEach((a, ai) => {
+            const v  = votiMap[a.id] || {};
+            const ro = aperta ? '' : 'readonly disabled';
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><span class="text-muted me-1">${ai+1}.</span> ${esc(a.cognome)} ${esc(a.nome)}</td>
+                <td class="text-center">
+                    <input type="number" class="form-control form-control-sm text-center d-inline-block"
+                           id="prof-${idx}-${a.id}" min="1" max="10" step="0.5"
+                           value="${v.profitto ?? ''}" placeholder="—" ${ro}>
+                </td>
+                <td class="text-center">
+                    <input type="number" class="form-control form-control-sm text-center d-inline-block"
+                           id="comp-${idx}-${a.id}" min="1" max="10" step="1"
+                           value="${v.comportamento ?? ''}" placeholder="—" ${ro}>
+                </td>
+                <td>
+                    <input type="text" class="form-control form-control-sm"
+                           id="note-${idx}-${a.id}" value="${esc(v.note||'')}" ${ro}>
+                </td>`;
+            tbody.appendChild(tr);
+        });
+    });
+
+    container.appendChild(acc);
+}
+
+// ─── Caricamento dati docente ─────────────────────────────────────────────────
+async function caricaModoDocente(token) {
+    const ghData = await ghGet(`data/docenti/${token}.json`);
     if (!ghData) {
-        mostraErrore('Sessione non trovata',
+        mostraErrore('Dati non trovati',
             'Non è stato possibile trovare i dati per questo link. '
-            + 'Potrebbe essere scaduto o non ancora attivato. '
+            + 'Potrebbe non essere ancora attivato o il link è errato. '
             + 'Contattare la segreteria.');
         return;
     }
 
+    currentToken = token;
     fileSha      = ghData.sha;
-    sessioneData = JSON.parse(b64Decode(ghData.content.replace(/\n/g, '')));
+    docenteData  = JSON.parse(b64Decode(ghData.content.replace(/\n/g,'')));
 
-    // Controlla stato sessione
-    const stato = sessioneData.stato_sessione;
-    const scadenza = new Date(sessioneData.data_limite + 'T23:59:59');
-    const oggi     = new Date();
+    const sessioni = docenteData.sessioni || [];
+    document.getElementById('info-docente').textContent        = docenteData.docente_nome || '—';
+    document.getElementById('info-sessioni-count').textContent =
+        sessioni.length + (sessioni.length === 1 ? ' sessione attiva' : ' sessioni attive');
 
-    sessioneAperta = (stato === 'aperto' || stato === 'bozza') && oggi <= scadenza;
+    costruisciAccordion(sessioni);
 
-    // Popola info sessione
-    document.getElementById('info-corso').textContent    = sessioneData.nome_corso || '—';
-    document.getElementById('info-materia').textContent  = sessioneData.materia_descr || sessioneData.materia_cod || '—';
-    document.getElementById('info-docente').textContent  = sessioneData.docente_nome || '—';
-    document.getElementById('info-anno').textContent     = sessioneData.anno_formativo || '—';
-    document.getElementById('info-tipo').textContent     = sessioneData.tipo ? (sessioneData.tipo.charAt(0).toUpperCase() + sessioneData.tipo.slice(1)) : '—';
-    document.getElementById('info-scadenza').textContent = formatData(sessioneData.data_limite);
-
-    if (!sessioneAperta) {
-        document.getElementById('banner-chiuso').classList.remove('d-none');
-        document.getElementById('panel-salva').style.display = 'none';
-    } else {
-        // Switch visibilità
-        document.getElementById('panel-visibilita').classList.remove('d-none');
-        document.getElementById('chk-visibile').checked = !!sessioneData.visibile_colleghi;
-    }
-
-    // Costruisce tabella alunni
-    costruisciTabella(sessioneData.alunni || [], sessioneData.voti || [], !sessioneAperta);
-
-    // Voti colleghi
-    await caricaColleghi(sessioneData.id_sessione, sessioneData.alunni || []);
-
-    // Mostra UI
     document.getElementById('spinner-overlay').style.display = 'none';
-    document.getElementById('main-content').style.display = '';
+    document.getElementById('main-content').style.display    = '';
     document.getElementById('panel-info').classList.remove('d-none');
+    document.getElementById('panel-errore').classList.add('d-none');
 
-    document.title = `Voti ${sessioneData.materia_descr} — ${sessioneData.nome_corso}`;
-}
-
-function formatData(iso) {
-    if (!iso) return '—';
-    const [y, m, d] = iso.split('-');
-    return `${d}/${m}/${y}`;
-}
-
-// ─── Tabella alunni ───────────────────────────────────────────────────────────
-function costruisciTabella(alunni, votiEsistenti, readonly) {
-    const votiMap = {};
-    (votiEsistenti || []).forEach(v => { votiMap[v.id_allievo] = v; });
-
-    const tbody = document.getElementById('tbody-voti');
-    tbody.innerHTML = '';
-
-    alunni.forEach((a, i) => {
-        const v = votiMap[a.id] || {};
-        const n = i + 1;
-        const ro = readonly ? 'readonly disabled' : '';
-
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td><span class="text-muted me-1">${n}.</span> ${esc(a.cognome)} ${esc(a.nome)}</td>
-            <td class="text-center">
-                <input type="number" class="form-control form-control-sm text-center d-inline-block"
-                       id="prof-${a.id}" name="prof-${a.id}"
-                       min="1" max="10" step="0.5"
-                       value="${v.profitto !== undefined && v.profitto !== null ? v.profitto : ''}"
-                       placeholder="—" ${ro}>
-            </td>
-            <td class="text-center">
-                <input type="number" class="form-control form-control-sm text-center d-inline-block"
-                       id="comp-${a.id}" name="comp-${a.id}"
-                       min="1" max="10" step="1"
-                       value="${v.comportamento !== undefined && v.comportamento !== null ? v.comportamento : ''}"
-                       placeholder="—" ${ro}>
-            </td>
-            <td>
-                <input type="text" class="form-control form-control-sm"
-                       id="note-${a.id}" name="note-${a.id}"
-                       value="${esc(v.note || '')}"
-                       placeholder="" ${ro}>
-            </td>`;
-        tbody.appendChild(tr);
-    });
-}
-
-function esc(s) {
-    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    document.title = `Scrutinio — ${docenteData.docente_nome || 'Inserimento voti'}`;
 }
 
 // ─── Salvataggio voti ─────────────────────────────────────────────────────────
 async function salvaVoti() {
-    if (!sessioneAperta) return;
+    const sessioni = docenteData ? (docenteData.sessioni || []) : [];
+    const haAperte = isAdmin || sessioni.some(s => isSessioneAperta(s));
+    if (!haAperte) return;
 
     const btn = document.getElementById('btn-salva');
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Salvataggio…';
 
-    const alunni = sessioneData.alunni || [];
-    const voti = alunni.map(a => {
-        const prof = document.getElementById(`prof-${a.id}`)?.value;
-        const comp = document.getElementById(`comp-${a.id}`)?.value;
-        const note = document.getElementById(`note-${a.id}`)?.value;
-        return {
-            id_allievo:    a.id,
-            profitto:      prof !== '' && prof !== undefined ? parseFloat(prof) : null,
-            comportamento: comp !== '' && comp !== undefined ? parseInt(comp, 10) : null,
-            note:          note || null,
-        };
+    sessioni.forEach((s, idx) => {
+        if (!isAdmin && !isSessioneAperta(s)) return;
+
+        const visEl = document.getElementById(`vis-${idx}`);
+        if (visEl) s.visibile_colleghi = visEl.checked ? 1 : 0;
+
+        s.voti = (s.alunni || []).map(a => {
+            const prof = document.getElementById(`prof-${idx}-${a.id}`)?.value;
+            const comp = document.getElementById(`comp-${idx}-${a.id}`)?.value;
+            const note = document.getElementById(`note-${idx}-${a.id}`)?.value;
+            return {
+                id_allievo:    a.id,
+                profitto:      prof !== '' && prof != null ? parseFloat(prof) : null,
+                comportamento: comp !== '' && comp != null ? parseInt(comp, 10) : null,
+                note:          note || null,
+            };
+        });
     });
 
-    const visibile = document.getElementById('chk-visibile')?.checked ? 1 : 0;
+    docenteData.aggiornato_at = new Date().toISOString();
 
-    // Aggiorna payload locale
-    sessioneData.voti              = voti;
-    sessioneData.visibile_colleghi = visibile;
-    sessioneData.aggiornato_at     = new Date().toISOString();
-
-    const path = `data/tokens/${getParam('token')}.json`;
     const result = await ghPut(
-        path, sessioneData,
-        `Voti ${sessioneData.materia_descr} — ${sessioneData.nome_corso} — ${sessioneData.docente_nome}`,
+        `data/docenti/${currentToken}.json`,
+        docenteData,
+        `Voti ${docenteData.docente_nome} — aggiornamento`,
         fileSha
     );
 
@@ -429,7 +365,7 @@ async function salvaVoti() {
     }
 
     btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-save me-2"></i>Salva voti';
+    btn.innerHTML = '<i class="fas fa-save me-2"></i>Salva tutti i voti';
 }
 
 // ─── Modalità amministratore ──────────────────────────────────────────────────
@@ -442,22 +378,19 @@ async function caricaModoAdmin() {
         return;
     }
 
-    adminIndex = JSON.parse(b64Decode(ghData.content.replace(/\n/g, '')));
+    adminIndex = JSON.parse(b64Decode(ghData.content.replace(/\n/g,'')));
 
-    // Mostra pannello admin
     document.getElementById('panel-admin').style.display = '';
     const selSessione = document.getElementById('admin-select-sessione');
-    adminIndex.sessioni.forEach(s => {
+    (adminIndex.sessioni || []).forEach(s => {
         const opt = document.createElement('option');
         opt.value = s.id;
         opt.textContent = `${s.nome_corso} — ${s.tipo} ${s.anno_formativo} (${s.stato})`;
         selSessione.appendChild(opt);
     });
 
-    // Nascondi spinner, mostra main-content vuoto
     document.getElementById('spinner-overlay').style.display = 'none';
-    document.getElementById('main-content').style.display = '';
-    // Nasconde pannello info finché non si seleziona una sessione
+    document.getElementById('main-content').style.display    = '';
     document.getElementById('panel-info').classList.add('d-none');
     document.getElementById('panel-errore').classList.add('d-none');
 }
@@ -465,20 +398,20 @@ async function caricaModoAdmin() {
 function adminSelezionaSessione() {
     const idSessione = document.getElementById('admin-select-sessione').value;
     const selToken   = document.getElementById('admin-select-token');
-    selToken.innerHTML = '<option value="">— seleziona docente/materia —</option>';
+    selToken.innerHTML = '<option value="">— seleziona docente —</option>';
     selToken.style.display = 'none';
     document.getElementById('panel-info').classList.add('d-none');
 
     if (!idSessione) return;
-
-    const sessione = adminIndex.sessioni.find(s => s.id == idSessione);
+    const sessione = (adminIndex.sessioni || []).find(s => s.id == idSessione);
     if (!sessione) return;
 
-    sessione.tokens.forEach(t => {
-        const opt     = document.createElement('option');
-        opt.value     = t.token;
-        const stato   = t.compilato ? '✓' : '○';
-        opt.textContent = `${stato} ${t.materia_descr} — ${t.docente_nome}`;
+    (sessione.tokens || []).forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t.token;
+        const stato = t.compilato ? '✓' : '○';
+        const materie = t.n_materie > 1 ? ` (${t.n_materie} materie)` : '';
+        opt.textContent = `${stato} ${t.docente_nome}${materie}`;
         selToken.appendChild(opt);
     });
     selToken.style.display = '';
@@ -489,65 +422,31 @@ async function adminSelezionaToken() {
     if (!tokenVal) { document.getElementById('panel-info').classList.add('d-none'); return; }
 
     document.getElementById('spinner-overlay').style.display = 'flex';
+    document.getElementById('panel-info').classList.add('d-none');
     await caricaModoDocente(tokenVal);
-    // In modalità admin il form è sempre aperto (indipendentemente dalla scadenza)
-    if (!sessioneAperta) {
-        sessioneAperta = true;
-        document.getElementById('banner-chiuso').classList.add('d-none');
-        document.getElementById('panel-salva').style.display = '';
-        document.getElementById('panel-visibilita').classList.remove('d-none');
-        // Riabilita input
-        document.querySelectorAll('#tbody-voti input').forEach(el => {
-            el.removeAttribute('readonly');
-            el.removeAttribute('disabled');
-        });
-    }
-}
 
-// ─── Voti colleghi ────────────────────────────────────────────────────────────
-async function caricaColleghi(idSessione, alunni) {
-    const path     = `data/sessioni/${idSessione}/pubblici.json`;
-    const ghData   = await ghGet(path);
-    if (!ghData) return;
-
-    let payload;
-    try { payload = JSON.parse(b64Decode(ghData.content.replace(/\n/g,''))); }
-    catch(e) { return; }
-
-    if (!payload.materie || payload.materie.length === 0) return;
-
-    // Mappa id alunno → nome
-    const nomiMap = {};
-    alunni.forEach(a => { nomiMap[a.id] = `${a.cognome} ${a.nome}`; });
-
-    const container = document.getElementById('tabelle-colleghi');
-    container.innerHTML = '';
-
-    payload.materie.forEach(m => {
-        m.docenti.forEach(doc => {
-            const table = document.createElement('table');
-            table.className = 'table table-sm table-bordered mb-0';
-            table.innerHTML = `
-                <thead class="table-secondary">
-                    <tr><th colspan="3">${esc(m.descr)} — <em>${esc(doc.docente)}</em></th></tr>
-                    <tr><th>Alunno</th><th class="text-center">Profitto</th><th class="text-center">Comportamento</th></tr>
-                </thead>
-                <tbody>
-                    ${doc.voti.map(v => `
-                    <tr>
-                        <td>${esc(nomiMap[v.id_allievo] || `#${v.id_allievo}`)}</td>
-                        <td class="text-center">${v.profitto ?? '—'}</td>
-                        <td class="text-center">${v.comportamento ?? '—'}</td>
-                    </tr>`).join('')}
-                </tbody>`;
-            container.appendChild(table);
-        });
+    // In admin mode: riabilita tutti gli input bloccati
+    document.querySelectorAll('#accordion-sessioni input[disabled]').forEach(el => {
+        el.removeAttribute('readonly');
+        el.removeAttribute('disabled');
     });
-
-    document.getElementById('panel-colleghi').classList.remove('d-none');
 }
 
 // ─── Avvio ────────────────────────────────────────────────────────────────────
+async function caricaSessione() {
+    const token = getParam('token');
+    if (!token || token.length < 16) {
+        mostraErrore('Link non valido', 'Il link non è valido. Verificare l\'email ricevuta.');
+        return;
+    }
+    if (token === ADMIN_TOKEN) {
+        isAdmin = true;
+        await caricaModoAdmin();
+        return;
+    }
+    await caricaModoDocente(token);
+}
+
 caricaSessione();
 </script>
 </body>
