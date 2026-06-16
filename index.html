@@ -93,6 +93,53 @@
 
         <!-- Accordion corsi/materie -->
         <div id="accordion-sessioni"></div>
+
+        <!-- Legenda valutazioni -->
+        <div class="mt-4">
+            <a class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" href="#legenda-val">
+                <i class="fas fa-info-circle me-1"></i>Legenda valutazioni
+            </a>
+            <div class="collapse mt-3" id="legenda-val">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header bg-primary text-white fw-semibold small py-2">Valutazione dell'apprendimento (Profitto)</div>
+                            <table class="table table-sm table-bordered mb-0 small">
+                                <thead class="table-light"><tr><th>Voto</th><th>Giudizio</th><th>Criteri</th></tr></thead>
+                                <tbody>
+                                    <tr><td class="text-center fw-bold">10</td><td>Ottimo</td><td>Capacità di analisi, sintesi e valutazione critica</td></tr>
+                                    <tr><td class="text-center fw-bold">9</td><td>Distinto</td><td>Conoscenze complete, autonomia di lavoro</td></tr>
+                                    <tr><td class="text-center fw-bold">8</td><td>Buono</td><td>Conoscenze complete, capacità di applicare i concetti</td></tr>
+                                    <tr><td class="text-center fw-bold">7</td><td>Discreto</td><td>Conoscenze corrette, applica i concetti in situazioni note</td></tr>
+                                    <tr><td class="text-center fw-bold">6</td><td>Sufficiente</td><td>Conoscenze corrette</td></tr>
+                                    <tr><td class="text-center fw-bold">5</td><td>Insufficiente</td><td>Conoscenze lacunose e superficiali</td></tr>
+                                    <tr><td class="text-center fw-bold">4</td><td>Insufficiente</td><td>Lacune o errori gravi nelle conoscenze e/o competenze</td></tr>
+                                    <tr><td class="text-center fw-bold">3</td><td>Scarso</td><td>Poche conoscenze e/o competenze</td></tr>
+                                    <tr><td class="text-center fw-bold">2</td><td>Scarso</td><td>Nessuna o quasi conoscenza e/o competenza</td></tr>
+                                    <tr><td class="text-center fw-bold">1</td><td>Scarso</td><td>Nessuna conoscenza</td></tr>
+                                    <tr><td class="text-center fw-bold">N.C.</td><td>—</td><td>Non classificato</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header bg-secondary text-white fw-semibold small py-2">Valutazione del comportamento</div>
+                            <table class="table table-sm table-bordered mb-0 small">
+                                <thead class="table-light"><tr><th>Voto</th><th>Giudizio</th><th>Criteri</th></tr></thead>
+                                <tbody>
+                                    <tr><td class="text-center fw-bold">8</td><td>Buono</td><td>Rispetta tutte le regole e mantiene rapporti di stima e collaborazione con insegnanti e compagni</td></tr>
+                                    <tr><td class="text-center fw-bold">7</td><td>Discreto</td><td>Ha un comportamento corretto e collabora con insegnanti e compagni</td></tr>
+                                    <tr><td class="text-center fw-bold">6</td><td>Sufficiente</td><td>Ha un comportamento vivace ma fondamentalmente corretto</td></tr>
+                                    <tr><td class="text-center fw-bold">5</td><td>Insufficiente</td><td>È poco controllato e poco rispettoso, non risponde positivamente ai richiami</td></tr>
+                                    <tr><td class="text-center fw-bold">4</td><td>Scarso</td><td>L'allievo non si controlla; l'atteggiamento nei riguardi di insegnanti e compagni non è consono ad un ambiente scolastico</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
 </div>
@@ -157,13 +204,18 @@ function mostraToast(msg, tipo='success') {
     new bootstrap.Toast(el, { delay: 4000 }).show();
 }
 
-// ─── Helper: opzioni voto (N.C. + 1-10) ─────────────────────────────────────
-function opzioniVoto(valoreCorrente) {
-    const voti = [['', '—'], [0, 'N.C.'], ...Array.from({length:10},(_,i)=>[i+1,i+1])];
-    return voti.map(([v, label]) => {
+// ─── Helper: opzioni voto ────────────────────────────────────────────────────
+function _opzioni(voci, valoreCorrente) {
+    return voci.map(([v, label]) => {
         const sel = valoreCorrente !== null && valoreCorrente !== undefined && String(valoreCorrente) === String(v) ? 'selected' : '';
         return `<option value="${v}" ${sel}>${label}</option>`;
     }).join('');
+}
+function opzioniProfitto(val) {
+    return _opzioni([['','—'],[0,'N.C.'],...Array.from({length:10},(_,i)=>[i+1,i+1])], val);
+}
+function opzioniComportamento(val) {
+    return _opzioni([['','—'],[4,4],[5,5],[6,6],[7,7],[8,8]], val);
 }
 
 
@@ -249,6 +301,15 @@ function costruisciAccordion(sessioni) {
                         <i class="fas fa-lock me-1"></i>
                         Sessione <strong>${esc(s.stato_sessione)}</strong> — voti in sola lettura.
                     </div>`}
+                    ${(()=>{
+                        const arts = [...new Set((s.alunni||[]).filter(a=>a.corart>0).map(a=>a.corart))];
+                        if (!arts.length) return '';
+                        const labels = ['','primary','warning','success','danger'];
+                        return '<div class="d-flex gap-2 mb-2 small">'
+                            + '<span class="text-muted">Articolazioni:</span>'
+                            + arts.map(n=>`<span class="badge bg-${labels[n]||'secondary'} text-dark">Art. ${n}</span>`).join('')
+                            + '</div>';
+                    })()}
                     <table class="table table-sm table-hover tabella-voti">
                         <thead class="table-light">
                             <tr>
@@ -268,20 +329,24 @@ function costruisciAccordion(sessioni) {
         const votiMap = {};
         (s.voti || []).forEach(v => { votiMap[v.id_allievo] = v; });
         const tbody = item.querySelector(`#tbody-${idx}`);
+        const corartColors = ['', 'table-primary', 'table-warning', 'table-success', 'table-danger'];
+        const haArticolazioni = (s.alunni || []).some(a => a.corart > 0);
         (s.alunni || []).forEach((a, ai) => {
             const v  = votiMap[a.id] || {};
             const ro = aperta ? '' : 'readonly disabled';
+            const rowClass = haArticolazioni && a.corart > 0 ? (corartColors[a.corart] || '') : '';
             const tr = document.createElement('tr');
+            if (rowClass) tr.className = rowClass;
             tr.innerHTML = `
                 <td><span class="text-muted me-1">${ai+1}.</span> ${esc(a.cognome)} ${esc(a.nome)}</td>
                 <td class="text-center">
                     <select class="form-select form-select-sm" id="prof-${idx}-${a.id}" ${ro}>
-                        ${opzioniVoto(v.profitto)}
+                        ${opzioniProfitto(v.profitto)}
                     </select>
                 </td>
                 <td class="text-center">
                     <select class="form-select form-select-sm" id="comp-${idx}-${a.id}" ${ro}>
-                        ${opzioniVoto(v.comportamento)}
+                        ${opzioniComportamento(v.comportamento)}
                     </select>
                 </td>
                 <td>
