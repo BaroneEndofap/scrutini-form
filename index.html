@@ -18,6 +18,11 @@
         .badge-scaduto  { background: #dc3545; }
         .badge-aperto   { background: #198754; }
         .toast-container { position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 9999; }
+        #panel-salva { position: sticky; top: 0; z-index: 100; background: #f8f9fa; padding: .75rem 0; border-bottom: 1px solid #dee2e6; margin-bottom: 1.5rem !important; }
+        #stato-salvataggio { font-size: .875rem; }
+        #stato-salvataggio.dirty { color: #dc3545; font-weight: 600; }
+        #stato-salvataggio.saved { color: #198754; }
+        #stato-salvataggio.idle  { color: #6c757d; }
         #spinner-overlay {
             position: fixed; inset: 0; background: rgba(255,255,255,.85);
             display: flex; align-items: center; justify-content: center; z-index: 9000;
@@ -83,11 +88,11 @@
 
         <!-- Pulsanti salvataggio -->
         <div id="panel-salva" class="d-flex gap-3 align-items-center mb-4">
-            <button class="btn btn-primary btn-lg px-5" id="btn-salva" onclick="salvaVoti()">
+            <button class="btn btn-primary btn-lg px-5 flex-shrink-0" id="btn-salva" onclick="salvaVoti()">
                 <i class="fas fa-save me-2"></i>Salva tutti i voti
             </button>
-            <div class="text-muted small" id="info-salvataggio">
-                Puoi salvare e tornare in seguito — il link rimane valido fino alla scadenza.
+            <div id="stato-salvataggio" class="idle">
+                <i class="fas fa-info-circle me-1"></i>Puoi salvare e tornare in seguito — il link rimane valido fino alla scadenza.
             </div>
         </div>
 
@@ -171,6 +176,7 @@ let fileSha      = null;
 let isAdmin      = false;
 let adminIndex   = null;
 let currentToken = null;   // portal token in uso
+let haModifiche  = false;  // dirty flag: ci sono modifiche non salvate
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
 function getParam(name) { return new URLSearchParams(window.location.search).get(name); }
@@ -267,6 +273,72 @@ async function ghPut(path, content, commitMsg, sha) {
     return { _errStatus: res.status };
 }
 
+// ─── Dirty state ─────────────────────────────────────────────────────────────
+function marcaDirty() {
+    haModifiche = true;
+    const el = document.getElementById('stato-salvataggio');
+    el.className = 'dirty';
+    el.innerHTML = '<i class="fas fa-exclamation-circle me-1"></i>Modifiche non salvate — ricorda di salvare prima di uscire.';
+}
+
+function marcaSalvato(riepilogo) {
+    haModifiche = false;
+    const el = document.getElementById('stato-salvataggio');
+    el.className = 'saved';
+    el.innerHTML = '<i class="fas fa-check-circle me-1"></i>Salvato alle '
+        + new Date().toLocaleTimeString('it-IT')
+        + ' — ' + riepilogo;
+}
+
+function aggiornaBadgeSessione(idx, s) {
+    const badgeEl = document.getElementById(`badge-salv-${idx}`);
+    if (!badgeEl) return;
+    const alunni = s.alunni || [];
+    if (!alunni.length) { badgeEl.innerHTML = ''; return; }
+
+    let prof = 0, comp = 0;
+    alunni.forEach(a => {
+        if (document.getElementById(`prof-${idx}-${a.id}`)?.value !== '') prof++;
+        if (document.getElementById(`comp-${idx}-${a.id}`)?.value !== '') comp++;
+    });
+    const n = alunni.length;
+
+    if (prof === 0 && comp === 0) {
+        badgeEl.innerHTML = `<span class="badge bg-light text-muted border">Da compilare</span>`;
+    } else if (prof === n && comp === n) {
+        badgeEl.innerHTML = `<span class="badge bg-success"><i class="fas fa-check-circle me-1"></i>Completo</span>`;
+    } else {
+        badgeEl.innerHTML = `<span class="badge bg-warning text-dark">${prof}/${n} profitti · ${comp}/${n} comp.</span>`;
+    }
+}
+
+function aggiornaTuttiBadge() {
+    (docenteData?.sessioni || []).forEach((s, idx) => aggiornaBadgeSessione(idx, s));
+}
+
+function contaVotiCompilati() {
+    const sessioni = docenteData ? (docenteData.sessioni || []) : [];
+    let profitti = 0, comportamenti = 0, totaleAlunni = 0;
+    sessioni.forEach((s, idx) => {
+        if (!isAdmin && !isSessioneAperta(s)) return;
+        (s.alunni || []).forEach(a => {
+            totaleAlunni++;
+            const prof = document.getElementById(`prof-${idx}-${a.id}`)?.value;
+            const comp = document.getElementById(`comp-${idx}-${a.id}`)?.value;
+            if (prof !== '' && prof !== undefined) profitti++;
+            if (comp !== '' && comp !== undefined) comportamenti++;
+        });
+    });
+    return { profitti, comportamenti, totaleAlunni };
+}
+
+window.addEventListener('beforeunload', e => {
+    if (haModifiche) {
+        e.preventDefault();
+        e.returnValue = '';
+    }
+});
+
 // ─── Sessione modificabile? ───────────────────────────────────────────────────
 function isSessioneAperta(s) {
     const oggi = new Date();
@@ -357,6 +429,7 @@ function costruisciAccordion(sessioni, colleghiMap = {}) {
                     <span class="text-muted mx-2">—</span>
                     <span>${esc(s.materia_descr || s.materia_cod)}</span>
                     ${badgeStato}
+                    <span id="badge-salv-${idx}" class="ms-2"></span>
                     <span class="text-muted small ms-auto me-3">Scadenza: ${formatData(s.data_limite)}</span>
                 </button>
             </h2>
@@ -432,6 +505,21 @@ function costruisciAccordion(sessioni, colleghiMap = {}) {
     });
 
     container.appendChild(acc);
+
+    // Ascolta i cambiamenti su tutti gli input delle sessioni aperte:
+    // marca dirty E aggiorna il badge della materia in tempo reale.
+    container.querySelectorAll('select, input[type=text]').forEach(el => {
+        if (!el.disabled) {
+            el.addEventListener('change', () => {
+                marcaDirty();
+                const m = el.id.match(/^(?:prof|comp|note)-(\d+)-/);
+                if (m) {
+                    const i = parseInt(m[1]);
+                    aggiornaBadgeSessione(i, docenteData.sessioni[i]);
+                }
+            });
+        }
+    });
 }
 
 // ─── Caricamento dati docente ─────────────────────────────────────────────────
@@ -464,11 +552,21 @@ async function caricaModoDocente(token) {
         sessioni.length + (sessioni.length === 1 ? ' sessione attiva' : ' sessioni attive');
 
     costruisciAccordion(sessioni, colleghiMap);
+    aggiornaTuttiBadge();   // badge iniziali dai voti già presenti nel JSON
 
     document.getElementById('spinner-overlay').style.display = 'none';
     document.getElementById('main-content').style.display    = '';
     document.getElementById('panel-info').classList.remove('d-none');
     document.getElementById('panel-errore').classList.add('d-none');
+
+    // Mostra data ultimo aggiornamento del file (dal JSON)
+    if (docenteData.aggiornato_at) {
+        const dt = new Date(docenteData.aggiornato_at);
+        const el = document.getElementById('stato-salvataggio');
+        el.className = 'saved';
+        el.innerHTML = '<i class="fas fa-check-circle me-1"></i>Dati caricati — ultimo salvataggio: '
+            + dt.toLocaleString('it-IT');
+    }
 
     document.title = `Scrutinio — ${docenteData.docente_nome || 'Inserimento voti'}`;
 }
@@ -518,13 +616,17 @@ async function salvaVoti() {
 
     if (result && !result._errStatus) {
         fileSha = result.content?.sha || fileSha;
-        mostraToast('Voti salvati correttamente.', 'success');
-        document.getElementById('info-salvataggio').innerHTML =
-            '<i class="fas fa-check-circle text-success me-1"></i>'
-            + 'Ultimo salvataggio: ' + new Date().toLocaleString('it-IT');
+        const { profitti, comportamenti, totaleAlunni } = contaVotiCompilati();
+        const riepilogo = `${profitti}/${totaleAlunni} profitti, ${comportamenti}/${totaleAlunni} comportamenti salvati su GitHub.`;
+        mostraToast('✓ Voti salvati correttamente.', 'success');
+        marcaSalvato(riepilogo);
+        aggiornaTuttiBadge();
     } else {
-        const stato = result?._errStatus ? ` (errore ${result._errStatus})` : '';
+        const stato = result?._errStatus ? ` (errore HTTP ${result._errStatus})` : '';
         mostraToast(`Errore durante il salvataggio${stato}. Riprovare.`, 'danger');
+        const el = document.getElementById('stato-salvataggio');
+        el.className = 'dirty';
+        el.innerHTML = `<i class="fas fa-times-circle me-1"></i>Salvataggio fallito${stato} — riprovare.`;
     }
 
     btn.disabled = false;
