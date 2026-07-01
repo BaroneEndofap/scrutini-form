@@ -250,27 +250,99 @@ async function ghGetFresh(path) {
     return res.json();
 }
 
-async function ghPut(path, content, commitMsg, sha) {
-    const bodyObj = { message: commitMsg, content: b64Encode(JSON.stringify(content, null, 2)), branch: GH_BRANCH };
+async function ghPutRaw(path, contentObj, commitMsg, sha) {
+    const bodyObj = { message: commitMsg, content: b64Encode(JSON.stringify(contentObj, null, 2)), branch: GH_BRANCH };
     if (sha) bodyObj.sha = sha;
-    let res = await fetch(
+    const res = await fetch(
         `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}`,
         { method: 'PUT', headers: GH_HEADERS, body: JSON.stringify(bodyObj) }
     );
-    if (res.ok) return await res.json();
-    // Conflitto SHA (409): rilegge SHA aggiornato e riprova una volta
-    if (res.status === 409) {
-        const fresh = await ghGetFresh(path);
-        if (fresh) {
-            bodyObj.sha = fresh.sha;
-            res = await fetch(
-                `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}`,
-                { method: 'PUT', headers: GH_HEADERS, body: JSON.stringify(bodyObj) }
-            );
-            if (res.ok) return await res.json();
-        }
+    if (res.ok) {
+        const json = await res.json();
+        return { ok: true, status: res.status, sha: json.content?.sha || null };
     }
-    return { _errStatus: res.status };
+    return { ok: false, status: res.status };
+}
+
+function attesa(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// MERGE-ALGO v1 — tenere in sync con _scrutini_vince_voto() in scrutini_portal.php
+function vinceVoto(locale, remoto) {
+    const tsL = locale.aggiornato_at || null;
+    const tsR = remoto.aggiornato_at || null;
+    if (tsL && tsR) return new Date(tsR) > new Date(tsL) ? remoto : locale;
+
+    const completezza = v => (v.profitto !== null ? 1 : 0) + (v.comportamento !== null ? 1 : 0) + (v.note ? 1 : 0);
+    return completezza(remoto) >= completezza(locale) ? remoto : locale;
+}
+
+// MERGE-ALGO v1 — tenere in sync con _scrutini_merge_sessione_entry() in scrutini_portal.php
+// Confronta un'entry sessione locale (appena editata nel form) con la
+// corrispondente letta fresca da GitHub e restituisce l'entry con, per ogni
+// allievo, il voto piu' recente fra i due lati — cosi' un salvataggio fatto
+// da un altro tab/dispositivo nel frattempo non viene sovrascritto in blocco.
+function mergeSessioneVoti(entryLocale, entryRemoto) {
+    if (!entryRemoto) return entryLocale;
+
+    const votiRemotiByAllievo = {};
+    (entryRemoto.voti || []).forEach(v => { votiRemotiByAllievo[v.id_allievo] = v; });
+
+    const votiMerged = (entryLocale.voti || []).map(vLocale => {
+        const vRemoto = votiRemotiByAllievo[vLocale.id_allievo];
+        if (vRemoto) delete votiRemotiByAllievo[vLocale.id_allievo];
+        return vRemoto ? vinceVoto(vLocale, vRemoto) : vLocale;
+    });
+    // righe presenti solo lato remoto (es. import non ancora avvenuto per quell'allievo)
+    Object.values(votiRemotiByAllievo).forEach(v => votiMerged.push(v));
+    entryLocale.voti = votiMerged;
+
+    const tsL = entryLocale.visibile_colleghi_at || null;
+    const tsR = entryRemoto.visibile_colleghi_at || null;
+    if (tsR && (!tsL || new Date(tsR) > new Date(tsL))) {
+        entryLocale.visibile_colleghi    = entryRemoto.visibile_colleghi;
+        entryLocale.visibile_colleghi_at = tsR;
+    }
+    return entryLocale;
+}
+
+// ─── Log di controllo (audit) — recupero senza dipendere dalla commit history ──
+function nextClientSeq() {
+    const key = `scrutini_audit_seq_${currentToken}`;
+    const seq = parseInt(localStorage.getItem(key) || '0', 10) + 1;
+    localStorage.setItem(key, String(seq));
+    return seq;
+}
+
+// Accoda una riga all'ndjson di audit del docente per una sessione. Un append
+// e' sempre sicuro sotto conflitto (basta ri-leggere e ri-accodare, non serve
+// merge), quindi qui il retry e' minimale. Fallimento non bloccante e non
+// segnalato con un errore rosso: e' un log ausiliario di recupero, il
+// salvataggio principale (sopra, in salvaVoti) resta comunque la fonte di
+// verita' e non e' a rischio se questo fallisce.
+async function ghAppendAuditLine(riga) {
+    const path = `data/audit/${riga.id_sessione}/${currentToken}.ndjson`;
+    const rigaTesto = JSON.stringify(riga) + '\n';
+
+    for (let tentativo = 1; tentativo <= 2; tentativo++) {
+        const fresh = await ghGetFresh(path);
+        let contenutoAttuale = '';
+        let sha = null;
+        if (fresh) {
+            sha = fresh.sha;
+            try { contenutoAttuale = b64Decode(fresh.content.replace(/\n/g, '')); } catch (e) { contenutoAttuale = ''; }
+        }
+        const bodyObj = { message: `Audit voti sessione ${riga.id_sessione}`, content: b64Encode(contenutoAttuale + rigaTesto), branch: GH_BRANCH };
+        if (sha) bodyObj.sha = sha;
+
+        const res = await fetch(
+            `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}`,
+            { method: 'PUT', headers: GH_HEADERS, body: JSON.stringify(bodyObj) }
+        );
+        if (res.ok) return true;
+        if ((res.status === 409 || res.status === 422) && tentativo < 2) { await attesa(300); continue; }
+        return false;
+    }
+    return false;
 }
 
 // ─── Dirty state ─────────────────────────────────────────────────────────────
@@ -581,11 +653,17 @@ async function salvaVoti() {
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Salvataggio…';
 
+    const oraSalvataggio = new Date().toISOString();
+    const sessioniModificate = [];
     sessioni.forEach((s, idx) => {
         if (!isAdmin && !isSessioneAperta(s)) return;
 
         const visEl = document.getElementById(`vis-${idx}`);
-        if (visEl) s.visibile_colleghi = visEl.checked ? 1 : 0;
+        if (visEl) {
+            const nuovoVis = visEl.checked ? 1 : 0;
+            if (nuovoVis !== s.visibile_colleghi) s.visibile_colleghi_at = oraSalvataggio;
+            s.visibile_colleghi = nuovoVis;
+        }
 
         s.voti = (s.alunni || []).map(a => {
             const prof = document.getElementById(`prof-${idx}-${a.id}`)?.value;
@@ -596,34 +674,80 @@ async function salvaVoti() {
                 profitto:      prof !== '' && prof !== undefined ? parseInt(prof, 10) : null,
                 comportamento: comp !== '' && comp !== undefined ? parseInt(comp, 10) : null,
                 note:          note || null,
+                aggiornato_at: oraSalvataggio,
             };
         });
+        sessioniModificate.push(s);
     });
 
-    docenteData.aggiornato_at = new Date().toISOString();
+    docenteData.aggiornato_at = oraSalvataggio;
 
-    // Rilegge lo SHA fresco prima di salvare: evita conflitti da cache iOS
-    // o da push admin avvenuti dopo l'apertura della pagina
-    const freshFile = await ghGetFresh(`data/docenti/${currentToken}.json`);
-    if (freshFile) fileSha = freshFile.sha;
+    // Retry-su-conflitto: ogni tentativo rilegge il contenuto REALE remoto
+    // (non solo lo sha) e rifà il merge voto-per-voto, cosi' un salvataggio
+    // fatto da un altro tab/dispositivo dello stesso docente nel frattempo
+    // non viene sovrascritto in blocco (causa nota di "voti spariti").
+    const path = `data/docenti/${currentToken}.json`;
+    let esito = { ok: false, status: null };
+    for (let tentativo = 1; tentativo <= 3; tentativo++) {
+        const fresh = await ghGetFresh(path);
+        let remoteData = null;
+        if (fresh) {
+            try { remoteData = JSON.parse(b64Decode(fresh.content.replace(/\n/g, ''))); } catch (e) { /* file corrotto: procede senza merge */ }
+        }
+        if (remoteData) {
+            const idsLocali = new Set(docenteData.sessioni.map(s => s.id_scrutini_token));
+            docenteData.sessioni = docenteData.sessioni.map(sLocale => {
+                const sRemota = (remoteData.sessioni || []).find(r => r.id_scrutini_token === sLocale.id_scrutini_token);
+                return sRemota ? mergeSessioneVoti(sLocale, sRemota) : sLocale;
+            });
+            (remoteData.sessioni || []).forEach(sRemota => {
+                if (!idsLocali.has(sRemota.id_scrutini_token)) docenteData.sessioni.push(sRemota);
+            });
+        }
 
-    const result = await ghPut(
-        `data/docenti/${currentToken}.json`,
-        docenteData,
-        `Voti ${docenteData.docente_nome} — aggiornamento`,
-        fileSha
-    );
+        esito = await ghPutRaw(path, docenteData, `Voti ${docenteData.docente_nome} — aggiornamento`, fresh ? fresh.sha : null);
+        if (esito.ok) break;
 
-    if (result && !result._errStatus) {
-        fileSha = result.content?.sha || fileSha;
+        if ((esito.status === 409 || esito.status === 422) && tentativo < 3) {
+            await attesa(300 + Math.random() * 500);
+            continue;
+        }
+        if (esito.status >= 500 && tentativo < 3) {
+            await attesa(500 * tentativo);
+            continue;
+        }
+        break; // errore permanente (401/403/404) o tentativi esauriti: niente altri retry
+    }
+
+    if (esito.ok) {
+        fileSha = esito.sha || fileSha;
         const { profitti, comportamenti, totaleAlunni } = contaVotiCompilati();
         const riepilogo = `${profitti}/${totaleAlunni} profitti, ${comportamenti}/${totaleAlunni} comportamenti salvati su GitHub.`;
         mostraToast('✓ Voti salvati correttamente.', 'success');
         marcaSalvato(riepilogo);
         aggiornaTuttiBadge();
+
+        // Log di controllo per il recupero — best-effort, mai bloccante: se
+        // fallisce, il salvataggio principale sopra resta comunque valido.
+        const auditEsiti = await Promise.all(sessioniModificate.map(s => ghAppendAuditLine({
+            ts:                 oraSalvataggio,
+            client_seq:         nextClientSeq(),
+            actor:              'docente',
+            id_docente:         docenteData.id_docente,
+            id_sessione:        s.id_sessione,
+            id_scrutini_token:  s.id_scrutini_token,
+            materia_cod:        s.materia_cod,
+            visibile_colleghi:  s.visibile_colleghi,
+            voti:               s.voti,
+        })));
+        if (auditEsiti.some(ok => !ok)) {
+            document.getElementById('stato-salvataggio').insertAdjacentHTML('beforeend',
+                ' <i class="fas fa-info-circle text-muted" title="Log di controllo non aggiornato — il salvataggio principale è comunque riuscito"></i>');
+        }
     } else {
-        const stato = result?._errStatus ? ` (errore HTTP ${result._errStatus})` : '';
-        mostraToast(`Errore durante il salvataggio${stato}. Riprovare.`, 'danger');
+        // Mai un fallimento silenzioso: l'utente deve sapere che deve riprovare.
+        const stato = esito.status ? ` (errore HTTP ${esito.status})` : '';
+        mostraToast(`Errore durante il salvataggio${stato} — riprovare.`, 'danger');
         const el = document.getElementById('stato-salvataggio');
         el.className = 'dirty';
         el.innerHTML = `<i class="fas fa-times-circle me-1"></i>Salvataggio fallito${stato} — riprovare.`;
