@@ -87,9 +87,12 @@
         </div>
 
         <!-- Pulsanti salvataggio -->
-        <div id="panel-salva" class="d-flex gap-3 align-items-center mb-4">
+        <div id="panel-salva" class="d-flex gap-3 align-items-center mb-4 flex-wrap">
             <button class="btn btn-primary btn-lg px-5 flex-shrink-0" id="btn-salva" onclick="salvaVoti()">
                 <i class="fas fa-save me-2"></i>Salva tutti i voti
+            </button>
+            <button class="btn btn-outline-primary btn-lg px-4 flex-shrink-0 d-none" id="btn-riepilogo" onclick="apriRiepilogoStampabile()">
+                <i class="fas fa-file-pdf me-2"></i>Scarica riepilogo
             </button>
             <div id="stato-salvataggio" class="idle">
                 <i class="fas fa-info-circle me-1"></i>Puoi salvare e tornare in seguito — il link rimane valido fino alla scadenza.
@@ -726,6 +729,7 @@ async function salvaVoti() {
         mostraToast('✓ Voti salvati correttamente.', 'success');
         marcaSalvato(riepilogo);
         aggiornaTuttiBadge();
+        document.getElementById('btn-riepilogo').classList.remove('d-none');
 
         // Log di controllo per il recupero — best-effort, mai bloccante: se
         // fallisce, il salvataggio principale sopra resta comunque valido.
@@ -755,6 +759,72 @@ async function salvaVoti() {
 
     btn.disabled = false;
     btn.innerHTML = '<i class="fas fa-save me-2"></i>Salva tutti i voti';
+}
+
+// ─── Riepilogo stampabile ─────────────────────────────────────────────────────
+// Documento personale del docente (non è la fonte di verità dei dati, quella
+// resta il gestionale): serve solo perché abbia una prova di cosa ha inserito,
+// generato dai dati appena salvati con successo.
+function apriRiepilogoStampabile() {
+    const sessioni = docenteData ? (docenteData.sessioni || []) : [];
+    const oraStr = new Date().toLocaleString('it-IT');
+
+    let corpo = '';
+    sessioni.forEach(s => {
+        if (!isAdmin && !isSessioneAperta(s)) return;
+
+        const votiMap = {};
+        (s.voti || []).forEach(v => { votiMap[v.id_allievo] = v; });
+        const righe = (s.alunni || []).map((a, i) => {
+            const v = votiMap[a.id] || {};
+            return `<tr>
+                <td>${i + 1}</td>
+                <td>${esc(a.cognome)} ${esc(a.nome)}</td>
+                <td style="text-align:center">${v.profitto != null ? v.profitto : '—'}</td>
+                <td style="text-align:center">${v.comportamento != null ? v.comportamento : '—'}</td>
+                <td>${esc(v.note || '')}</td>
+            </tr>`;
+        }).join('');
+
+        corpo += `
+            <h3>${esc(s.nome_corso)} — ${esc(s.materia_descr || s.materia_cod)}</h3>
+            <table>
+                <thead><tr><th>#</th><th>Alunno</th><th>Profitto</th><th>Comportamento</th><th>Note</th></tr></thead>
+                <tbody>${righe || '<tr><td colspan="5">Nessun alunno.</td></tr>'}</tbody>
+            </table>`;
+    });
+
+    const html = `<!DOCTYPE html>
+<html lang="it"><head><meta charset="UTF-8">
+<title>Riepilogo voti — ${esc(docenteData.docente_nome || '')}</title>
+<style>
+    body { font-family: Arial, Helvetica, sans-serif; margin: 2rem; color: #222; }
+    h1 { font-size: 1.3rem; margin-bottom: 0; }
+    .sottotitolo { color: #666; margin-top: .2rem; margin-bottom: 1.5rem; font-size: .9rem; }
+    h3 { margin-top: 1.8rem; margin-bottom: .5rem; font-size: 1rem; border-bottom: 1px solid #ccc; padding-bottom: .3rem; }
+    table { width: 100%; border-collapse: collapse; font-size: .85rem; margin-bottom: .5rem; }
+    th, td { border: 1px solid #ccc; padding: .35rem .5rem; }
+    th { background: #f2f2f2; text-align: left; }
+    @media print { body { margin: 1cm; } }
+</style>
+</head><body>
+    <h1>Riepilogo voti inseriti — ${esc(docenteData.docente_nome || '')}</h1>
+    <div class="sottotitolo">
+        Generato il ${esc(oraStr)} — documento personale del docente, non sostituisce i dati ufficiali sul gestionale.
+    </div>
+    ${corpo || '<p>Nessuna sessione aperta al momento.</p>'}
+</body></html>`;
+
+    const finestra = window.open('', '_blank');
+    if (!finestra) {
+        mostraToast('Il browser ha bloccato l\'apertura della finestra. Consenti i popup per scaricare il riepilogo.', 'warning');
+        return;
+    }
+    finestra.document.open();
+    finestra.document.write(html);
+    finestra.document.close();
+    finestra.focus();
+    setTimeout(() => finestra.print(), 300);
 }
 
 // ─── Modalità amministratore ──────────────────────────────────────────────────
